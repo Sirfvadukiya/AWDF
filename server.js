@@ -1,125 +1,108 @@
+require('dotenv').config();
 const express = require('express');
+const mongoose = require('mongoose');
+const Task = require('./models/Task');
+
 const app = express();
-const PORT = 5000;
 
-// ==========================================
-// 1. Core Middleware
-// ==========================================
-
-// Parse JSON request body (Required for POST/PUT)
+// Middleware
 app.use(express.json());
 
-// Request Logging Middleware (Global)
+// Request Logging Middleware (Practical 4)
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url} - ${new Date().toISOString()}`);
   next();
 });
 
-// Supplementary Task 1: Check Content-Type header on POST and PUT requests
-app.use((req, res, next) => {
-  if (['POST', 'PUT'].includes(req.method)) {
-    const contentType = req.headers['content-type'];
-    if (!contentType || !contentType.includes('application/json')) {
-      return res.status(400).json({ error: 'Content-Type must be application/json' });
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('Connected to MongoDB successfully'))
+  .catch((err) => console.error('MongoDB connection error:', err));
+
+// --- CRUD Routes ---
+
+// 1. GET /tasks - Fetch all tasks
+app.get('/tasks', async (req, res, next) => {
+  try {
+    const tasks = await Task.find();
+    res.status(200).json(tasks);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// 2. GET /tasks/:id - Fetch single task by ID
+app.get('/tasks/:id', async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
     }
+    res.status(200).json(task);
+  } catch (error) {
+    next(error);
   }
-  next();
 });
 
-// ==========================================
-// 2. In-Memory Data Storage
-// ==========================================
-let tasks = [
-  { id: 1, title: 'Learn Express.js', completed: false },
-  { id: 2, title: 'Build REST API', completed: true }
-];
-
-// Supplementary Task 2: Middleware to validate task ID format
-const validateTaskId = (req, res, next) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
-    return res.status(400).json({ error: 'Task ID must be a valid number' });
+// 3. POST /tasks - Create a new task
+app.post('/tasks', async (req, res, next) => {
+  try {
+    const task = await Task.create(req.body);
+    res.status(201).json(task);
+  } catch (error) {
+    next(error);
   }
-  req.taskId = id;
-  next();
-};
-
-// ==========================================
-// 3. CRUD Routes
-// ==========================================
-
-// GET /tasks - Fetch all tasks (Status: 200)
-app.get('/tasks', (req, res) => {
-  res.status(200).json(tasks);
 });
 
-// GET /tasks/:id - Fetch a single task by ID (Status: 200 / 404)
-app.get('/tasks/:id', validateTaskId, (req, res) => {
-  const task = tasks.find(t => t.id === req.taskId);
-  if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
+// 4. PUT /tasks/:id - Update a task
+app.put('/tasks/:id', async (req, res, next) => {
+  try {
+    const updatedTask = await Task.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!updatedTask) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.status(200).json(updatedTask);
+  } catch (error) {
+    next(error);
   }
-  res.status(200).json(task);
 });
 
-// POST /tasks - Create a new task (Status: 201)
-app.post('/tasks', (req, res) => {
-  const { title, completed } = req.body;
-  if (!title) {
-    return res.status(400).json({ error: 'Title is required' });
+// 5. DELETE /tasks/:id - Delete a task
+app.delete('/tasks/:id', async (req, res, next) => {
+  try {
+    const deletedTask = await Task.findByIdAndDelete(req.params.id);
+    if (!deletedTask) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.status(200).json({ message: 'Task deleted successfully' });
+  } catch (error) {
+    next(error);
   }
-
-  const newTask = {
-    id: tasks.length > 0 ? tasks[tasks.length - 1].id + 1 : 1,
-    title,
-    completed: completed || false
-  };
-
-  tasks.push(newTask);
-  res.status(201).json(newTask);
 });
 
-// PUT /tasks/:id - Update an existing task (Status: 200 / 404)
-app.put('/tasks/:id', validateTaskId, (req, res) => {
-  const taskIndex = tasks.findIndex(t => t.id === req.taskId);
-  if (taskIndex === -1) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-
-  const { title, completed } = req.body;
-  if (title !== undefined) tasks[taskIndex].title = title;
-  if (completed !== undefined) tasks[taskIndex].completed = completed;
-
-  res.status(200).json(tasks[taskIndex]);
-});
-
-// DELETE /tasks/:id - Delete a task (Status: 200 / 404)
-app.delete('/tasks/:id', validateTaskId, (req, res) => {
-  const taskIndex = tasks.findIndex(t => t.id === req.taskId);
-  if (taskIndex === -1) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-
-  const deletedTask = tasks.splice(taskIndex, 1);
-  res.status(200).json({ message: 'Task deleted successfully', task: deletedTask[0] });
-});
-
-// ==========================================
-// 4. Error & 404 Middleware
-// ==========================================
-
-// Supplementary Task 3: 404 Handler for undefined routes
+// Custom 404 Handler for undefined routes
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Global Error Handler (Must be defined last)
+// Global Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong' });
+
+  // Structured Validation Error Response
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ error: err.message });
+  }
+  if (err.name === 'CastError') {
+    return res.status(400).json({ error: 'Invalid ID format' });
+  }
+
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
