@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const mongoose = require('mongoose');
 const Task = require('./models/Task');
 
 const app = express();
 
 // Middleware
+app.use(cors());
 app.use(express.json());
 
 // Request Logging Middleware (Practical 4)
@@ -15,16 +17,25 @@ app.use((req, res, next) => {
 });
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI)
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/taskdb';
+mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB successfully'))
   .catch((err) => console.error('MongoDB connection error:', err));
+
+// Auth Routes from backend if available
+try {
+  const authRoutes = require('./backend/routes/auth');
+  app.use('/auth', authRoutes);
+} catch (e) {
+  // optional
+}
 
 // --- CRUD Routes ---
 
 // 1. GET /tasks - Fetch all tasks
 app.get('/tasks', async (req, res, next) => {
   try {
-    const tasks = await Task.find();
+    const tasks = await Task.find().sort({ createdAt: -1 });
     res.status(200).json(tasks);
   } catch (error) {
     next(error);
